@@ -256,6 +256,7 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid rgba
     <button class="mbtn" data-act="champ">Kampioenschap<small>3 circuits · punten per race</small></button>
     <button class="mbtn" data-act="garage">Garage<small>Auto, kleur en velgen</small></button>
     <button class="mbtn" data-act="settings">Instellingen<small>Kwaliteit, geluid, besturing</small></button>
+    <button class="mbtn hidden" data-act="exit" id="menuExit">Terug naar Meester Jop<small>Je instellingen en records worden bewaard</small></button>
   </div>
   <div id="menuFoot">Toetsen: pijltjes/WASD · Spatie handrem · Shift nitro · C camera · R reset · Esc pauze</div>
   <div id="menuRecords"></div>
@@ -301,7 +302,7 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid rgba
     <div class="row"><label>Auto-resolutie</label><div class="seg" data-opt="dynRes"><button data-v="1">Aan</button><button data-v="0">Uit</button></div></div>
     <div class="row"><label>Geluid</label><div class="seg" data-opt="sfxOn"><button data-v="1">Aan</button><button data-v="0">Uit</button></div><input type="range" min="0" max="100" data-range="sfxVol"></div>
     <div class="row"><label>Muziek</label><div class="seg" data-opt="musicOn"><button data-v="1">Aan</button><button data-v="0">Uit</button></div><input type="range" min="0" max="100" data-range="musicVol"></div>
-    <div class="row"><label>Sturen mobiel</label><div class="seg" data-opt="touchSteer"><button data-v="buttons">Knoppen</button><button data-v="gyro">Kantelen (gyro)</button></div></div>
+    <div class="row" id="rowGyro"><label>Sturen mobiel</label><div class="seg" data-opt="touchSteer"><button data-v="buttons">Knoppen</button><button data-v="gyro">Kantelen (gyro)</button></div></div>
     <div class="row"><label>Stuurgevoel</label><input type="range" min="40" max="160" data-range="steerSens"></div>
     <div class="row"><label>Rijhulp</label><div class="seg" data-opt="assist"><button data-v="0">Uit</button><button data-v="1">Licht</button><button data-v="2">Sterk</button></div></div>
     <div class="row"><label>Snelheid in</label><div class="seg" data-opt="units"><button data-v="kmh">km/u</button><button data-v="mph">mph</button></div></div>
@@ -537,7 +538,12 @@ function loadSave() {
     else if (SAVE[k] === undefined) SAVE[k] = DEFAULTS[k];
   }
 }
-function persist() { try { localStorage.setItem(STORE_KEY, JSON.stringify(SAVE)); } catch (e) { /* opslag vol of geblokkeerd: negeren */ } }
+function persist() {
+  // Meester Jop bewaart maximaal 100.000 tekens per spel: dan de oudste ghosts laten vallen.
+  let txt = JSON.stringify(SAVE);
+  while (txt.length > 80000 && Object.keys(SAVE.ghosts).length) { delete SAVE.ghosts[Object.keys(SAVE.ghosts)[0]]; txt = JSON.stringify(SAVE); }
+  try { localStorage.setItem(STORE_KEY, txt); } catch (e) { /* opslag vol of geblokkeerd: negeren */ }
+}
 loadSave();
 const S = SAVE.settings;
 function carCfg(i) { // auto + gekozen uiterlijk uit de garage
@@ -2664,12 +2670,12 @@ function finishCar(c) {
 /* ---------- ghost (tijdrit) ---------- */
 function startGhostRec() { race.ghostRec = { t0: race.t, frames: [], acc: 1 }; }
 function recordGhost(dt) {
-  const g = race.ghostRec; if (!g) return; g.acc += dt; if (g.acc < 0.05) return; g.acc = 0;
-  const c = race.player; g.frames.push(+(race.t - g.t0).toFixed(3), +c.x.toFixed(2), +c.model.position.y.toFixed(2), +c.z.toFixed(2), +c.head.toFixed(3));
+  const g = race.ghostRec; if (!g) return; g.acc += dt; if (g.acc < 0.1) return; g.acc = 0;   // 10 beelden/s: klein genoeg om op te slaan
+  const c = race.player; g.frames.push(+(race.t - g.t0).toFixed(2), +c.x.toFixed(1), +c.model.position.y.toFixed(1), +c.z.toFixed(1), +c.head.toFixed(2));
 }
 function finishGhostRec(lt) {
   const g = race.ghostRec;
-  if (g && g.frames.length > 20) {
+  if (g && g.frames.length > 10 * 5) {
     const old = SAVE.ghosts[TRK.def.id];
     if (!old || lt < old.t) { SAVE.ghosts[TRK.def.id] = { t: lt, car: race.player.cfg.id, frames: g.frames }; persist(); race.ghostData = SAVE.ghosts[TRK.def.id]; if (old) showNote('Nieuwe ghost opgeslagen', 2, '#5ad1ff'); }
   }
@@ -2917,7 +2923,8 @@ function bindTouch() {
   }
   $('tCam').addEventListener('pointerdown', e => { e.preventDefault(); cycleCamera(); });
   $('pauseBtn').addEventListener('click', () => togglePause());
-  addEventListener('deviceorientation', e => { if (e.beta == null) return; gyro.ok = true; gyro.beta = e.beta; });
+  // Op Meester Jop staat de bewegingssensor uit (Permissions-Policy): dan niet eens luisteren
+  if (!window.meesterJop) addEventListener('deviceorientation', e => { if (e.beta == null) return; gyro.ok = true; gyro.beta = e.beta; });
 }
 async function requestGyro() {
   try { if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) { const r = await DeviceOrientationEvent.requestPermission(); return r === 'granted'; } } catch (e) { return false; }
@@ -3109,6 +3116,7 @@ function bindMenus() {
     if (a === 'quick' || a === 'trial' || a === 'champ') openSetup(a);
     if (a === 'garage') openGarage();
     if (a === 'settings') { UI.fromPause = false; refreshSegs(); UI.show('settings'); }
+    if (a === 'exit') location.href = '/spelplein/';
   }));
   document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => { Audio_.click(); UI.back(); }));
   document.querySelectorAll('[data-set]').forEach(seg => seg.addEventListener('click', e => {
@@ -3536,6 +3544,8 @@ async function boot() {
     buildTextures(); FX.init(); applyQuality();
     bindMenus(); bindTouch(); buildTrackCards(); UI.layout();
     if (isTouch) $('rotate').classList.add('enabled');
+    // Op Meester Jop (meester-jop.nl): knop terug naar het Spelplein; de bewegingssensor is daar uitgeschakeld
+    if (window.meesterJop) { $('menuExit').classList.remove('hidden'); $('rowGyro').style.display = 'none'; if (S.touchSteer === 'gyro') S.touchSteer = 'buttons'; }
     prog(0.15, 'Circuit laden…');
     await loadTrack(SAVE.race.track, 'auto', 'dry', prog);
     goMenu();
